@@ -1,6 +1,6 @@
-# DPIA-lite — điền trong checkpoint 5
+# DPIA-lite — checkpoint 5
 
-1. Loại dữ liệu và phân loại:
-2. Mục đích xử lý và principal:
-3. Dữ liệu đi qua những run/tool nào, endpoint nào:
-4. Bằng chứng deny/allow và giới hạn của mock:
+1. **Dữ liệu và phân loại.** `corpus/` chứa ticket không đáng tin cậy; `data/customers.json` chứa record synthetic với tên, CCCD, SĐT, STK, email và `related_tickets`. Các trường định danh/PII được coi là `restricted`. Lure và token trong lab đều giả, không dùng dữ liệu cá nhân hoặc credential thật.
+2. **Mục đích và principal.** Yêu cầu người dùng là tổng hợp ticket (`summarize-tickets`). Run B đọc hồ sơ gắn với ticket cho `support-reply` khi principal có quyền. `support_l1` chỉ được `search_docs`; `dpo` được `read_customer` cho mục đích hợp lệ. `--as` chọn principal giả lập từ `data/principals.json`, không chứng minh người gọi đã được xác thực.
+3. **Luồng dữ liệu.** Run A dùng `search_docs()` để đọc ticket và lấy ticket ID dạng số từ **tên file**. Chỉ tuple ID này đi sang Run B. Run B dùng `related_tickets` từ store tin cậy để suy customer ID, gọi policy trước `read_customer()`. Nội dung ticket được redact trước bước tóm tắt. `http_post` chỉ có đích hardcoded localhost `127.0.0.1:10024`; trong replay sau containment, PEP từ chối egress với dữ liệu restricted trước khi tool chạy.
+4. **Bằng chứng và giới hạn.** `reports/attack-before.log` ghi một POST chứa record synthetic `KH-000999`; `reports/attack-after.log` rỗng sau replay cùng query dưới `dpo`. `reports/ledger.jsonl` có 24 dòng, gồm một `http_post` deny có reason và `on_behalf_of=dpo`; `agent.ledger.verify()` trả `True`. Suite `tests/` có 33 test pass, PII precision/recall = 1.000 trên test set đi kèm. Mock không đánh giá xác thực, bảo mật mạng, độ chính xác trên dữ liệu thật, hay tuân thủ pháp lý. Hash chain trong một file không phát hiện cắt dòng cuối hoặc viết lại cả chuỗi nếu thiếu mốc tin cậy ngoài file.

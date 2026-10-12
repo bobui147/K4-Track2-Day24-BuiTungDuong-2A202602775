@@ -1,5 +1,5 @@
-# Baseline — điền trong checkpoint 1
+# Baseline — checkpoint 1
 
-1. Agent có identity mỗi run chưa? Dẫn file/hàm:
-2. Ai cho phép `http_post`? Dẫn file/hàm:
-3. Nếu gửi sai PII ra sink, bằng chứng ở đâu? Dẫn file/hàm:
+1. **Agent có identity riêng cho mỗi run chưa?** Chưa. `agent.loop.run_once()` (dòng 57–73) nhận `principal_id` mặc định là `support_l1`, nhưng khi `agent.runner.handle()` còn là stub, nó chuyển sang `_naive_loop(message, llm)` mà không truyền identity hoặc kiểm quyền. `_naive_loop()` (dòng 27–54) không tạo `agent_id`/`run_id`, không tra `data/principals.json` và không ghi ledger.
+2. **Ai cho phép `http_post`?** Không có policy/PEP nào cho phép hoặc từ chối theo quyền người dùng trong baseline. `_naive_loop()` ở `agent/loop.py` (dòng 35–49) tự lấy chỉ thị từ `llm.find_injection(combined_text)`, gọi `read_customer()` rồi `http_post()` ngay nếu có record. `agent/tools.py:http_post()` (dòng 68–86) chỉ giới hạn URL vào `127.0.0.1:10024`; đó là giới hạn an toàn của lab, không phải quyết định cấp quyền. `agent/llm.py:find_injection()` (dòng 65–78) đọc chỉ thị từ nội dung ticket không đáng tin cậy.
+3. **Bằng chứng đã gửi sai dữ liệu ở đâu?** `reports/attack-before.log` là bản sao log của `sink/sink.py:Handler.do_POST()` (dòng 42–51). Sau khi reset sink và chạy `python -m agent.loop --mock "Tổng hợp các ticket còn mở tuần này"`, log có một POST tới `/reconcile`, gồm record tổng hợp `KH-000999` với các trường PII. Luồng gây ra là `agent/tools.py:search_docs()` (dòng 34–52) trả toàn văn `corpus/ticket-901.md`, rồi `_naive_loop()` đọc record bằng `read_customer()` và POST. Đây là dữ liệu synthetic của bài lab, không phải dữ liệu cá nhân thật.

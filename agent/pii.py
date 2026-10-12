@@ -30,10 +30,52 @@ set ở tests/vn_pii_testset.jsonl):
 """
 from __future__ import annotations
 
+import re
+
+
+_EMAIL = re.compile(r"(?<![\w.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![A-Z0-9_-])", re.I)
+_DIGITS = re.compile(r"(?<!\d)\d{8,16}(?!\d)")
+_PHONE = re.compile(r"(?<!\d)0(?:[\s-]?\d){9,10}(?!\d)")
+_CCCD_LABEL = re.compile(r"\b(?:CCCD|căn\s*cước|can\s*cuoc)\b", re.I)
+_BANK_LABEL = re.compile(r"\b(?:STK|số\s*tài\s*khoản|so\s*tai\s*khoan|bank[_ ]?account)\b", re.I)
+
+
+def _near_label(text: str, start: int, pattern: re.Pattern[str]) -> bool:
+    # The label must precede the value closely; punctuation and names may sit
+    # between them, but a label for a previous number must not carry over.
+    prefix = text[max(0, start - 40):start]
+    return bool(pattern.search(prefix))
+
 
 def detect(text: str) -> list[dict]:
-    raise NotImplementedError("BƯỚC 3a: implement PII detection")
+    entities: list[dict] = []
+    for match in _EMAIL.finditer(text):
+        entities.append({"type": "EMAIL", "start": match.start(), "end": match.end()})
+
+    for match in _DIGITS.finditer(text):
+        value = match.group()
+        if _near_label(text, match.start(), _BANK_LABEL):
+            kind = "VN_BANK_ACCOUNT"
+        elif len(value) == 12 and _near_label(text, match.start(), _CCCD_LABEL):
+            kind = "VN_CCCD"
+        elif value.startswith("0") and len(value) in (10, 11):
+            kind = "VN_PHONE"
+        elif len(value) == 12:
+            kind = "VN_CCCD"
+        else:
+            kind = "VN_BANK_ACCOUNT"
+        entities.append({"type": kind, "start": match.start(), "end": match.end()})
+
+    occupied = [(entity["start"], entity["end"]) for entity in entities]
+    for match in _PHONE.finditer(text):
+        if not any(match.start() < end and start < match.end() for start, end in occupied):
+            entities.append({"type": "VN_PHONE", "start": match.start(), "end": match.end()})
+
+    return sorted(entities, key=lambda entity: (entity["start"], entity["end"]))
 
 
 def redact(text: str) -> str:
-    raise NotImplementedError("BƯỚC 3a: implement PII redaction")
+    for entity in reversed(detect(text)):
+        text = (text[:entity["start"]] + f"[REDACTED_{entity['type']}]"
+                + text[entity["end"]:])
+    return text

@@ -1,8 +1,7 @@
-# Secret giả trong lịch sử Git — điền trong checkpoint 4
+# Secret giả trong lịch sử Git — checkpoint 4
 
-- Scanner và phiên bản:
-- Commit chứa token giả:
-- File, rule và kết quả quét lịch sử:
-- Kết quả quét file hiện tại:
-- Nếu đây là credential thật, cần xử lý thế nào:
-- Vì sao xoá file khỏi HEAD hoặc pin dependency vẫn chưa đủ:
+- **Scanner:** Gitleaks v8.30.1 từ release chính thức. ZIP Windows x64 có SHA-256 `d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e`, khớp `gitleaks_8.30.1_checksums.txt` của release. Cấu hình: `.gitleaks.toml`.
+- **Quét lịch sử:** `gitleaks git --config .gitleaks.toml --redact --verbose .` trả exit code 1 như dự kiến, với **1 finding**. Rule ID `lab24-synthetic-token` bắt token `LAB24-DEMO` giả, vô hiệu trong `lab-fake-secret.txt:1` ở commit `1bdd849922156c868a5ee9293d68f5b72e242d2c`. File đã bị xoá ở commit tiếp theo. Giá trị token được redacted trong output; finding này là bằng chứng bài lab, không chứng minh có credential thật.
+- **Quét file hiện tại:** `gitleaks dir --config .gitleaks.toml --redact --verbose .` trả exit code 0, `no leaks found` sau khi dọn thư mục tạm của pytest và file README đi kèm binary Gitleaks trong `.venv/` (các ví dụ trong README tạo false positive; README không thuộc bài nộp).
+- **Nếu là secret thật:** Thu hồi hoặc rotate ngay tại nơi cấp, kiểm tra log sử dụng/truy cập, cấp lại credential tối thiểu cần thiết, rồi xử lý lịch sử Git và bản sao theo quy trình ứng cứu. Không tạo hoặc sử dụng credential thật trong bài lab.
+- **Giới hạn của các biện pháp:** Xoá file khỏi HEAD không làm credential đã công bố hết hiệu lực và không xoá lịch sử hay bản sao. Hash lock bảo đảm artifact dependency khớp hash đã chọn; hook Gitleaks giúp chặn secret mới ở thời điểm commit. Cả hai không thay thế bước thu hồi/rotate sau khi secret đã lộ.

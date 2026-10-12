@@ -1,10 +1,10 @@
-# Compliance mapping — điền trong checkpoint 5
+# Compliance mapping — checkpoint 5
 
-| Nguồn / yêu cầu | Control đã làm | Evidence file:dòng | Giới hạn |
-|---|---|---|---|
-| Luật 91/2025/QH15 | | | |
-| NĐ 356/2025/NĐ-CP | | | |
-| Luật AI 134/2025/QH15 | | | |
-| OWASP ASI01, ASI03, ASI04 | | | |
+Đối chiếu **tên và số văn bản** với cổng văn bản chính thức; chưa đối chiếu điều khoản cụ thể. Các liên hệ dưới đây là diễn giải kỹ thuật của bài lab, **không phải kết luận tuân thủ pháp luật**. Toàn bộ record và principal trong bài là synthetic/mô phỏng.
 
-Chỉ ghi điều khoản cụ thể khi đã đối chiếu văn bản gốc. Mô phỏng kỹ thuật không tự chứng minh tuân thủ pháp luật.
+- **[Luật Bảo vệ dữ liệu cá nhân 91/2025/QH15](https://vanban.chinhphu.vn/?docid=214590&pageid=27160):** PII gate phát hiện và che CCCD/SĐT/STK/email (`agent/pii.py:50`, `agent/pii.py:77`); runner chỉ đưa văn bản đã redact vào bước tóm tắt (`agent/runner.py:161`). Bằng chứng: `tests/test_pii.py:28`, kết quả precision/recall trong `reports/verification.md`. Điều khoản cụ thể và khả năng đáp ứng hệ thống thật: **chưa xác minh**.
+- **[Nghị định 356/2025/NĐ-CP](https://vanban.chinhphu.vn/?classid=1&docid=216387&pageid=27160&typegroupid=4):** mục đích và quyền theo principal được kiểm trước khi mở store và trước `read_customer` (`agent/policy.py:57`, `agent/runner.py:162`, `agent/runner.py:171`), mọi quyết định ghi `reason`/`on_behalf_of` (`agent/runner.py:87`, `agent/ledger.py:54`). Bằng chứng: `tests/test_obo.py:51`, `reports/ledger.jsonl` (dòng `read_customer` allow/deny). Điều khoản cụ thể và nghĩa vụ hồ sơ thực tế: **chưa xác minh**.
+- **[Luật Trí tuệ nhân tạo 134/2025/QH15](https://vanban.chinhphu.vn/?classid=1&docid=216334&pageid=27160):** ranh giới hai run và PEP là control kỹ thuật cho hành vi agent (`agent/runner.py:126`, `agent/runner.py:142`, `agent/runner.py:155`); test chứng minh khách chỉ xuất hiện trong free text không bị đọc (`tests/test_split.py:75`). Việc áp dụng điều khoản luật vào hệ thống giả lập này: **chưa xác minh**.
+- **[OWASP ASI01 — Agent Goal Hijack](https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/):** `corpus/ticket-901.md` đến `ticket-904b.md` là đầu vào không đáng tin cậy; `agent/runner.py:155` chỉ truyền ticket ID từ tên file sang Run B. Bằng chứng: `injection-corpus.md`, `tests/test_injection.py:71`, `reports/attack-before.log` và `reports/attack-after.log`.
+- **OWASP ASI03 — Identity & Privilege Abuse:** `agent/policy.py:57` giao quyền principal/agent/parent scope và kiểm TTL; `agent/runner.py:162` kiểm trước khi mở store. Bằng chứng: `tests/test_obo.py:29`, ledger `on_behalf_of`. `--as` chỉ là principal giả lập, không xác thực production.
+- **OWASP ASI04 — Agentic Supply Chain Vulnerabilities:** `.pre-commit-config.yaml:1` pin hook Gitleaks; `requirements.lock:1` chứa hash dependency; `reports/secrets-incident.md:3` ghi finding token giả ở lịch sử. Bằng chứng chạy công cụ: `reports/verification.md`. Hash lock và scanner không thay thế rà soát package hay thu hồi secret thật.

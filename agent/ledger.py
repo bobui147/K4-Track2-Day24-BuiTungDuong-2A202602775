@@ -37,12 +37,52 @@ rồi gọi verify() phải trả về False.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 
+_GENESIS = "0" * 64
+
+
+def _hash(entry: dict) -> str:
+    payload = {key: value for key, value in entry.items() if key != "hash"}
+    canonical = json.dumps(payload, sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def append(entry: dict, path: Path) -> dict:
-    raise NotImplementedError("BƯỚC 3d: implement ledger append")
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    previous = _GENESIS
+    if path.exists():
+        lines = path.read_text(encoding="utf-8").splitlines()
+        if lines:
+            previous = json.loads(lines[-1])["hash"]
+    recorded = dict(entry)
+    recorded["prev_hash"] = previous
+    recorded["hash"] = _hash(recorded)
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(recorded, ensure_ascii=False) + "\n")
+    return recorded
 
 
 def verify(path: Path) -> bool:
-    raise NotImplementedError("BƯỚC 3d: implement ledger verify")
+    path = Path(path)
+    if not path.exists():
+        return False
+    previous = _GENESIS
+    required = {"ts", "agent_id", "run_id", "tool", "args_hash",
+                "classification", "decision", "reason", "prev_hash", "hash"}
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            entry = json.loads(line)
+            if (not isinstance(entry, dict) or not required.issubset(entry)
+                    or not entry.get("reason")
+                    or entry.get("prev_hash") != previous
+                    or entry.get("hash") != _hash(entry)):
+                return False
+            previous = entry["hash"]
+    except (ValueError, TypeError, KeyError):
+        return False
+    return True

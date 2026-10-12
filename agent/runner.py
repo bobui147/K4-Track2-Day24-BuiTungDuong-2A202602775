@@ -59,7 +59,14 @@ Interface bắt buộc (agent/loop.py import và gọi hàm này nếu tồn t�
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from uuid import uuid4
+
+from agent import ledger, pii, policy, tools
 
 REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 DEFAULT_LEDGER_PATH = REPORTS_DIR / "ledger.jsonl"
@@ -69,6 +76,104 @@ class RunnerScaffoldPending(NotImplementedError):
     """Only the original 3c stub uses this to enable the CP1/CP2 baseline."""
 
 
+_TICKET_NAME = re.compile(r"^ticket-(\d+)\.md$")
+
+
+def _args_hash(value: object) -> str:
+    encoded = json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _decision(*, ledger_path: Path, principal_id: str, run_id: str,
+              agent_id: str, expires_at: str, tool: str, args: object,
+              classification: str, purpose: str, scopes: tuple[str, ...],
+              egress: bool = False) -> bool:
+    context = policy.PolicyContext(
+        data_classification=classification,
+        request_purpose=purpose,
+        agent_owner=agent_id,
+        delegation_depth=0,
+        egress_enabled=egress,
+        principal_id=principal_id,
+        requested_tool=tool,
+        agent_scopes=scopes,
+        expires_at=expires_at,
+    )
+    allowed, reason = policy.check(context)
+    ledger.append({
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "agent_id": agent_id,
+        "run_id": run_id,
+        "tool": tool,
+        "args_hash": _args_hash(args),
+        "classification": classification,
+        "decision": "allow" if allowed else "deny",
+        "reason": reason,
+        "on_behalf_of": principal_id,
+        "expires_at": expires_at,
+    }, ledger_path)
+    return allowed
+
+
+def _customer_ids_for_tickets(ticket_ids: tuple[int, ...]) -> list[str]:
+    """Trusted local mapping used only inside Run B; never parse doc text."""
+    customers = json.loads(tools.CUSTOMERS_FILE.read_text(encoding="utf-8"))
+    wanted = set(ticket_ids)
+    return [record["customer_id"] for record in customers
+            if wanted.intersection(record.get("related_tickets", ()))]
+
+
 def handle(message: str, llm, log_dir: Path | None = None,
            principal_id: str = "support_l1") -> str:
-    raise RunnerScaffoldPending("BƯỚC 3c: implement trifecta split")
+    ledger_path = (Path(log_dir) / "ledger.jsonl") if log_dir is not None else DEFAULT_LEDGER_PATH
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+    run_a_id, run_b_id = str(uuid4()), str(uuid4())
+
+    # Run A has the untrusted corpus, but no private record or egress tool.
+    if not _decision(ledger_path=ledger_path, principal_id=principal_id,
+                     run_id=run_a_id, agent_id="lab24-agent/run-a", expires_at=expires_at,
+                     tool="search_docs", args={"query": message}, classification="internal",
+                     purpose="summarize-tickets", scopes=("search_docs",)):
+        return llm.summarize([])
+    docs = tools.search_docs(message)
+    text = "\n\n".join(doc["text"] for doc in docs)
+    injected = llm.find_injection(text)
+
+    if injected is not None:
+        # Record the proposed egress at the PEP, without giving Run A an
+        # http_post capability or sending any data from the private store.
+        allowed = _decision(
+            ledger_path=ledger_path, principal_id=principal_id,
+            run_id=run_a_id, agent_id="lab24-agent/run-a", expires_at=expires_at,
+            tool="http_post", args={"url": injected.target_url},
+            classification="restricted", purpose="support-reply",
+            scopes=("search_docs",), egress=True,
+        )
+        if allowed:
+            raise RuntimeError("policy permitted forbidden Run A egress")
+
+    ticket_ids = tuple(sorted({int(match.group(1)) for doc in docs
+                               if (match := _TICKET_NAME.fullmatch(doc["id"]))}))
+
+    # Only typed ticket IDs cross the boundary. Run B derives customer IDs
+    # from the trusted relation, not from injected.customer_ids or free text.
+    # Gate access before opening the customer store, including its index.
+    safe_docs = [{"id": doc["id"], "text": pii.redact(doc["text"])} for doc in docs]
+    if ticket_ids and not _decision(
+        ledger_path=ledger_path, principal_id=principal_id,
+        run_id=run_b_id, agent_id="lab24-agent/run-b", expires_at=expires_at,
+        tool="read_customer", args={"ticket_ids": ticket_ids},
+        classification="restricted", purpose="support-reply",
+        scopes=("read_customer",),
+    ):
+        return llm.summarize(safe_docs)
+
+    for customer_id in _customer_ids_for_tickets(ticket_ids):
+        if _decision(ledger_path=ledger_path, principal_id=principal_id,
+                     run_id=run_b_id, agent_id="lab24-agent/run-b", expires_at=expires_at,
+                     tool="read_customer", args={"customer_id": customer_id},
+                     classification="restricted", purpose="support-reply",
+                     scopes=("read_customer",)):
+            tools.read_customer(customer_id)
+
+    return llm.summarize(safe_docs)

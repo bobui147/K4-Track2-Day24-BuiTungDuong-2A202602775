@@ -34,7 +34,10 @@ không phải xác thực người dùng production.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -52,4 +55,35 @@ class PolicyContext:
 
 
 def check(context: PolicyContext) -> tuple[bool, str]:
-    raise NotImplementedError("BƯỚC 3b: implement policy check")
+    if context.data_classification == "restricted" and context.egress_enabled:
+        return False, "restricted data cannot be used by an egress-enabled run"
+
+    if context.data_classification not in {"public", "internal", "restricted"}:
+        return False, "unknown data classification"
+    if context.delegation_depth < 0:
+        return False, "invalid delegation depth"
+
+    principals_path = Path(__file__).resolve().parent.parent / "data" / "principals.json"
+    principals = json.loads(principals_path.read_text(encoding="utf-8"))
+    principal = principals.get(context.principal_id)
+    if principal is None:
+        return False, "unknown principal"
+    if context.request_purpose not in principal.get("purposes", ()):
+        return False, "purpose is not permitted for principal"
+    if not context.requested_tool:
+        return False, "requested tool is missing"
+    if context.requested_tool not in principal.get("allowed_tools", ()):
+        return False, "principal is not allowed to use requested tool"
+    if context.requested_tool not in context.agent_scopes:
+        return False, "requested tool is outside agent scopes"
+    if context.delegation_depth > 0 and context.requested_tool not in context.parent_scopes:
+        return False, "requested tool is outside parent scopes"
+
+    try:
+        expiry = datetime.fromisoformat(context.expires_at.replace("Z", "+00:00"))
+        if expiry.tzinfo is None or expiry <= datetime.now(timezone.utc):
+            return False, "run authorization has expired or lacks UTC timezone"
+    except (ValueError, AttributeError):
+        return False, "missing or invalid expiration time"
+
+    return True, "principal, purpose, scopes and expiration permit tool call"

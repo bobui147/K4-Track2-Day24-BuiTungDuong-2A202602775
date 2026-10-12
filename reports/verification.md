@@ -1,7 +1,9 @@
-# Verification — điền trước khi nộp
+# Verification — checkpoint 5
 
-- OS / Python / Gitleaks version:
-- `python -m pytest tests/ -q`:
-- `pre-commit run --all-files`:
-- Ledger verify:
-- Các lỗi còn lại:
+- **Môi trường:** Windows native, Python 3.13.5 trong `.venv`, Gitleaks 8.30.1. README khuyến nghị WSL2/macOS/Linux; lần chạy này trên Windows native đã kiểm được toàn bộ mock suite. Không dùng model thật hoặc API key.
+- **Lure:** `python -m agent.check_lure corpus/ticket-90*.md` báo 4/4 sẵn sàng. Riêng `ticket-904.md` và `ticket-904b.md` đều cho `find_injection() == None` khi đọc đơn lẻ, ghép cặp mới nhận diện chỉ thị.
+- **Test:** `.venv/Scripts/python.exe -X utf8 -m pytest tests/ -q -s -p no:cacheprovider` trả exit code 0: **33 passed**. `tests/test_pii.py` in `gold=118 pred=118 tp=118`, precision **1.000**, recall **1.000**. Thông báo `0/1 lure sẵn sàng` trong output thuộc test âm tính cố ý của `test_check_lure_cli.py`, không phải lỗi của corpus nộp.
+- **Before/after:** `reports/attack-before.log` có 1 POST chứa record synthetic `KH-000999`; sau khi chạy test, reset sink lần nữa và replay đúng query `Tổng hợp các ticket còn mở tuần này` với `--mock --as dpo`. `reports/attack-after.log` rỗng (**0 byte**). `reports/ledger.jsonl` có 24 dòng, trong đó 1 `http_post` deny có reason/on_behalf_of và 22 `read_customer` allow cho `dpo` (gồm bước cho phép mở store và 21 record gắn ticket).
+- **Ledger:** `agent.ledger.verify(Path('reports/ledger.jsonl'))` trả `True`. `tests/test_ledger.py` chứng minh sửa dòng cũ làm verify trả False. Hash chain không phát hiện cắt đuôi hoặc viết lại toàn file nếu không có mốc tin cậy ngoài file.
+- **Supply chain:** `gitleaks git --config .gitleaks.toml --redact --verbose .` trả exit code 1 với đúng 1 finding token giả ở commit `1bdd849`; `gitleaks dir --config .gitleaks.toml --redact --verbose .` trả exit code 0, `no leaks found`. `pre-commit run --all-files` với hook `gitleaks-system` pin v8.30.1 trả **Passed**. `piptools compile --generate-hashes` tạo `requirements.lock`; `.venv/Scripts/python.exe -m pip install --require-hashes --force-reinstall -r requirements.lock` trả exit code 0.
+- **Lỗi môi trường đã xử lý:** Pytest trong sandbox Windows ban đầu không tạo/đọc được thư mục `tmp_path` (`PermissionError [WinError 5]`); chạy lại ngoài sandbox trong `.venv` cho 33 pass. `pip install pip-tools pre-commit` trong sandbox ban đầu không thấy package index; chạy lại với kết nối được phép thành công. Không còn test thất bại.
